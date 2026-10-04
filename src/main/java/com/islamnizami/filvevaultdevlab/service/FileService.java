@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
@@ -28,11 +29,20 @@ public class FileService {
     private final FileDownloadAuditRepository auditRepository;
 
     @Transactional
-    public FileResponseDTO uploadFile(MultipartFile file, String title, String description,String category, String ownerId){
-
-        try{
+    public FileResponseDTO uploadFile(MultipartFile file, String title, String description, String category, String ownerId) {
+        try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(file.getBytes());
+
+            try (InputStream inputStream = file.getInputStream()) {
+                byte[] buffer = new byte[8192]; // 8 KB-lıq kiçik buffer (paket)
+                int bytesRead;
+
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    digest.update(buffer, 0, bytesRead);
+                }
+            }
+
+            byte[] hash = digest.digest();
             StringBuilder hexString = new StringBuilder();
             for (byte b : hash) {
                 String hex = Integer.toHexString(0xff & b);
@@ -40,6 +50,7 @@ public class FileService {
                 hexString.append(hex);
             }
             String checksum = hexString.toString();
+
             String storedFilename = storageService.store(file);
 
             FileMetadata metadata = new FileMetadata();
@@ -51,12 +62,15 @@ public class FileService {
             metadata.setDescription(description);
             metadata.setCategory(category);
             metadata.setOwnerId(ownerId);
+
             metadata.setChecksum(checksum);
 
             FileMetadata savedMetadata = metadataRepository.save(metadata);
+
             return mapToResponseDTO(savedMetadata);
-        }catch (IOException | NoSuchAlgorithmException e){
-            throw new RuntimeException("Error calculatiing checksum or saving file",e);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error calculating checksum or saving file", e);
         }
     }
 
